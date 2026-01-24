@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #525659;
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 8px 16px;
+            background: #323639;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .toolbar button {
+            background: #474c50;
+            border: none;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .toolbar button:hover {
+            background: #5a6166;
+        }
+
+        .toolbar button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #page-info {
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .viewer-container {
+            height: calc(100% - 44px);
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        #pdf-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #pdf-container canvas {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            background: #fff;
+        }
+
+        .loading {
+            color: #fff;
+            font-size: 16px;
+            padding: 40px;
+        }
+
+        .error {
+            color: #ff6b6b;
+            font-size: 16px;
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <button id="zoom-out" title="Zoom Out">−</button>
+        <span id="zoom-level">100%</span>
+        <button id="zoom-in" title="Zoom In">+</button>
+        <span style="margin: 0 10px;">|</span>
+        <button id="prev-page" title="Previous Page">◀</button>
+        <span id="page-info">Page 1 / 1</span>
+        <button id="next-page" title="Next Page">▶</button>
+        <span style="margin: 0 10px;">|</span>
+        <button id="view-all" title="View All Pages">All Pages</button>
+        <button id="view-single" title="Single Page View">Single</button>
+    </div>
+
+    <div class="viewer-container">
+        <div id="pdf-container">
+            <div class="loading">Loading PDF...</div>
+        </div>
+    </div>
+
+    <script>
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let pdfDoc = null;
+        let currentPage = 1;
+        let scale = 1.0;
+        let viewMode = 'all'; // 'all' or 'single'
+
+        const container = document.getElementById('pdf-container');
+        const pageInfo = document.getElementById('page-info');
+        const zoomLevel = document.getElementById('zoom-level');
+
+        // Get PDF URL from query parameter, or use default
+        const urlParams = new URLSearchParams(window.location.search);
+        const pdfUrl = urlParams.get('pdf') || './20260124_WinterWeatherBriefing9.pdf';
+
+        loadPDF(pdfUrl);
+
+        async function loadPDF(url) {
+            try {
+                // For ArcGIS URLs, we may need to handle CORS
+                const loadingTask = pdfjsLib.getDocument({
+                    url: url,
+                    withCredentials: false
+                });
+
+                pdfDoc = await loadingTask.promise;
+                updatePageInfo();
+                renderPages();
+            } catch (error) {
+                console.error('Error loading PDF:', error);
+                container.innerHTML = `
+                    <div class="error">
+                        <strong>Error loading PDF</strong><br><br>
+                        ${error.message}<br><br>
+                        <small>URL: ${url}</small><br><br>
+                        <small>If this is an ArcGIS PDF, ensure it's publicly shared.</small>
+                    </div>
+                `;
+            }
+        }
+
+        async function renderPages() {
+            container.innerHTML = '';
+
+            if (viewMode === 'all') {
+                // Render all pages
+                for (let i = 1; i <= pdfDoc.numPages; i++) {
+                    await renderPage(i);
+                }
+            } else {
+                // Render single page
+                await renderPage(currentPage);
+            }
+        }
+
+        async function renderPage(pageNum) {
+            const page = await pdfDoc.getPage(pageNum);
+            const viewport = page.getViewport({ scale: scale });
+
+            const canvas = document.createElement('canvas');
+            canvas.id = `page-${pageNum}`;
+            const context = canvas.getContext('2d');
+
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            container.appendChild(canvas);
+
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
+        }
+
+        function updatePageInfo() {
+            if (pdfDoc) {
+                pageInfo.textContent = viewMode === 'single'
+                    ? `Page ${currentPage} / ${pdfDoc.numPages}`
+                    : `${pdfDoc.numPages} pages`;
+            }
+        }
+
+        function updateZoomLevel() {
+            zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+        }
+
+        // Event listeners
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            scale = Math.min(scale + 0.25, 3.0);
+            updateZoomLevel();
+            renderPages();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            scale = Math.max(scale - 0.25, 0.25);
+            updateZoomLevel();
+            renderPages();
+        });
+
+        document.getElementById('prev-page').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                updatePageInfo();
+                if (viewMode === 'single') {
+                    renderPages();
+                } else {
+                    document.getElementById(`page-${currentPage}`)?.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+        });
+
+        document.getElementById('next-page').addEventListener('click', () => {
+            if (pdfDoc && currentPage < pdfDoc.numPages) {
+                currentPage++;
+                updatePageInfo();
+                if (viewMode === 'single') {
+                    renderPages();
+                } else {
+                    document.getElementById(`page-${currentPage}`)?.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+        });
+
+        document.getElementById('view-all').addEventListener('click', () => {
+            viewMode = 'all';
+            updatePageInfo();
+            renderPages();
+        });
+
+        document.getElementById('view-single').addEventListener('click', () => {
+            viewMode = 'single';
+            updatePageInfo();
+            renderPages();
+        });
+    </script>
+</body>
+</html>
